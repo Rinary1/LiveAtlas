@@ -32,6 +32,8 @@ export interface LiveAtlasMapDefinitionOptions extends LiveAtlasTileLayerOptions
 	imageFormat: ImageFormat;
 	projection?: LiveAtlasProjection;
 	prefix?: string;
+    
+    renderer?: string;
 
 	background?: string;
 	nightAndDay?: boolean;
@@ -62,6 +64,8 @@ export default class LiveAtlasMapDefinition implements LiveAtlasTileLayerOptions
 	readonly tileSize: number;
 	readonly projection?: LiveAtlasProjection;
 	readonly prefix: string;
+    
+    readonly renderer: string;
 
 	readonly background: string;
 	readonly nightAndDay: boolean;
@@ -98,6 +102,8 @@ export default class LiveAtlasMapDefinition implements LiveAtlasTileLayerOptions
 		this.tileSize = options.tileSize;
 		this.projection = options.projection || undefined;
 		this.prefix = options.prefix || '';
+        
+        this.renderer = options.renderer || 'basic';
 
 		this.nativeZoomLevels = options.nativeZoomLevels || 1;
 		this.extraZoomLevels = options.extraZoomLevels || 0;

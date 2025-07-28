@@ -71,6 +71,14 @@ export const updatePointLayer = (marker: GenericMarker | undefined, options: Liv
 				iconAnchor: options.iconAnchor,
 				isHtml: !!options.tooltipHTML,
 			});
+            
+            if ('setRotationAngle' in marker && options.rotationAngle !== undefined) {
+                (marker as any).setRotationAngle(options.rotationAngle);
+            }
+
+            if ('setRotationOrigin' in marker && options.rotationOrigin !== undefined) {
+                (marker as any).setRotationOrigin(options.rotationOrigin);
+            }
 		}
 	}
 

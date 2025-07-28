@@ -21,7 +21,30 @@ import {LiveAtlasTileLayer, LiveAtlasTileLayerOptions} from "@/leaflet/tileLayer
 export class Pl3xmapTileLayer extends LiveAtlasTileLayer {
 	constructor(map: LiveAtlasTileLayerOptions) {
 		super(map);
-		this._url = `${map.baseUrl}{z}/{x}_{y}.png`;
-		Util.setOptions(this, {zoomReverse: false});
+		this._url = `${map.baseUrl}{z}/${map.renderer}/{x}_{y}.png`;
+        Util.setOptions(this, {
+          zoomReverse: false,
+          minNativeZoom: 0,
+          maxNativeZoom: map.nativeZoomLevels || 1, // взять из параметров мира
+          maxZoom: map.maxZoom || map.nativeZoomLevels + (map.extraZoomLevels || 2),
+          zoomOffset: -(map.extraZoomLevels || 2),
+          tileSize: map.tileSize || 512,
+          noWrap: true,
+        });
 	}
+    
+    _getZoomForUrl(): number {
+        const zoom: number = this._tileZoom!;
+        const maxZoom: number = this.options.maxZoom!;
+        const offset: number = this.options.zoomOffset!;
+        return (maxZoom - zoom) + offset;
+    }
+
+    getTileUrl(coords: L.Coords): string {
+        const z = this._getZoomForUrl();
+        return this._url
+            .replace('{x}', String(coords.x))
+            .replace('{y}', String(coords.y))
+            .replace('{z}', String(z));
+    }
 }

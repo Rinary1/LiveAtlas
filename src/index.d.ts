@@ -22,6 +22,7 @@ import {
 	PointTuple,
 	PolylineOptions
 } from "leaflet";
+import * as L from "leaflet";
 import {DynmapUrlConfig} from "@/dynmap";
 import LiveAtlasMapDefinition from "@/model/LiveAtlasMapDefinition";
 import {CoordinatesControlOptions} from "@/leaflet/control/CoordinatesControl";
@@ -30,6 +31,7 @@ import {LogoControlOptions} from "@/leaflet/control/LogoControl";
 import {globalMessages, serverMessages} from "../messages";
 import {LiveAtlasMarkerType} from "@/util/markers";
 import {LiveAtlasTileLayer, LiveAtlasTileLayerOptions} from "@/leaflet/tileLayer/LiveAtlasTileLayer";
+import "../lib/L.rotated";
 
 declare module "*.png" {
    const value: any;
@@ -220,6 +222,9 @@ interface LiveAtlasMarker {
 	location: Coordinate;
 	minZoom?: number;
 	maxZoom?: number;
+    
+	rotationAngle?: number;
+	rotationOrigin?: string;
 }
 
 interface LiveAtlasPointMarker extends LiveAtlasMarker {
@@ -366,4 +371,23 @@ export interface LiveAtlasTileElement extends HTMLImageElement {
 	url: string;
 	callback: DoneCallback;
 	abortController: AbortController;
+}
+
+declare module "leaflet" {
+    interface MarkerOptions {
+        rotationAngle?: number | undefined; // Rotation angle, in degrees, clockwise. (Default = 0)
+        rotationOrigin?: string | undefined; // The rotation center, as a transform-origin CSS rule. (Default = 'bottom center')
+    }
+
+    interface Marker {
+        /*
+         * Sets the rotation angle value.
+         */
+        setRotationAngle(newAngle: number): this;
+
+        /**
+         * Sets the rotation origin value.
+         */
+        setRotationOrigin(newOrigin: string): this;
+    }
 }

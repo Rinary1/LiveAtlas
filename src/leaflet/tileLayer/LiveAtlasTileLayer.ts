@@ -30,6 +30,7 @@ export interface LiveAtlasTileLayerOptions {
 	minZoom?: number;
 	maxZoom?: number;
 	tileUpdateInterval?: number;
+    renderer?: string;
 }
 
 export interface LiveAtlasTileLayerInternalOptions extends TileLayerOptions {

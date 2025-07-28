@@ -15,6 +15,7 @@
  */
 
 import {PointTuple} from "leaflet";
+import {computed} from "vue";
 import {
 	LiveAtlasAreaMarker,
 	LiveAtlasCircleMarker,
@@ -34,14 +35,13 @@ import {ActionTypes} from "@/store/action-types";
 import LiveAtlasMapDefinition from "@/model/LiveAtlasMapDefinition";
 import MapProvider from "@/providers/MapProvider";
 import {getBoundsFromPoints, getMiddle, stripHTML, titleColoursRegex, validateConfigURL} from "@/util";
-import {LiveAtlasMarkerType} from "@/util/markers";
+import {LiveAtlasMarkerType, updateMarkerLayer} from "@/util/markers";
 import {Pl3xmapTileLayer} from "@/leaflet/tileLayer/Pl3xmapTileLayer";
 import {LiveAtlasTileLayer, LiveAtlasTileLayerOptions} from "@/leaflet/tileLayer/LiveAtlasTileLayer";
 import {getDefaultPlayerImage} from "@/util/images";
 
 export default class Pl3xmapMapProvider extends MapProvider {
 	private configurationAbort?: AbortController = undefined;
-	private	markersAbort?: AbortController = undefined;
 	private	playersAbort?: AbortController = undefined;
 
 	private updatesEnabled = false;
@@ -78,9 +78,9 @@ export default class Pl3xmapMapProvider extends MapProvider {
 
 	private static buildServerConfig(response: any): LiveAtlasServerConfig {
 		return {
-			title: (response.ui?.title || 'Pl3xmap').replace(titleColoursRegex, ''),
+			title: (response.lang?.title || 'Pl3xmap').replace(titleColoursRegex, ''),
 			expandUI: response.ui?.sidebar?.pinned === 'pinned',
-			singleMapWorlds: true,
+			singleMapWorlds: false,
 
 			//Not used by pl3xmap
 			defaultZoom: 1,
@@ -107,17 +107,20 @@ export default class Pl3xmapMapProvider extends MapProvider {
 		}
 	}
 
-	private buildWorlds(serverResponse: any, worldResponses: any[]): Array<LiveAtlasWorldDefinition> {
+	private async buildWorlds(serverResponse: any, worldResponses: any[]): Promise<Array<LiveAtlasWorldDefinition>> {
 		const worlds: Array<LiveAtlasWorldDefinition> = [];
 
 		this.worldComponents.clear();
 		this.worldMarkerUpdateIntervals.clear();
 		this.worldPlayerUpdateIntervals.clear();
+        
+        this.configurationAbort = new AbortController();
 
-		const filteredWorlds = (serverResponse.worlds || []).filter((w: any) => w && !!w.name)
+		const filteredWorlds = (serverResponse.worldSettings || []).filter((w: any) => w && !!w.name)
 			.sort((a: any, b: any) => a.order - b.order);
 
-		filteredWorlds.forEach((world: any, index: number) => {
+		for (let index = 0; index < filteredWorlds.length; index++) {
+            const world = filteredWorlds[index];
 			const worldResponse = worldResponses[index],
 				worldConfig: {components: LiveAtlasPartialComponentConfig } = {
 					components: {
@@ -129,40 +132,44 @@ export default class Pl3xmapMapProvider extends MapProvider {
 						}
 					},
 				};
+                
+			if(!worldResponse) {
+				console.warn(`World ${world.name} has no matching world config. Ignoring.`);
+				continue;
+			}
 
 			this.worldMarkerUpdateIntervals.set(world.name, worldResponse.marker_update_interval || 3000);
+            
+            const markersResponce = await Pl3xmapMapProvider.getJSON(`${this.config}tiles/players.json`, this.configurationAbort.signal);
 
-			if(worldResponse.player_tracker?.enabled) {
-				const health = !!worldResponse.player_tracker?.nameplates?.show_health,
-					armor = !!worldResponse.player_tracker?.nameplates?.show_armor,
-					images = !!worldResponse.player_tracker?.nameplates?.show_heads,
-					updateInterval = worldResponse.player_tracker.update_interval ? worldResponse.player_tracker.update_interval * 1000 : 3000;
+			if(markersResponce.player_tracker?.enabled) {
+                const players = await this.getPlayers();
+                
+				const health = !!markersResponce.player_tracker?.nameplates?.show_health,
+					armor = !!markersResponce.player_tracker?.nameplates?.show_armor,
+					images = !!markersResponce.player_tracker?.nameplates?.show_heads,
+					updateInterval = markersResponce.player_tracker.update_interval ? markersResponce.player_tracker.update_interval * 1000 : 3000;
 
 				this.worldPlayerUpdateIntervals.set(world.name, updateInterval);
 
-				if(worldResponse.player_tracker?.nameplates?.heads_url) {
+				if(markersResponce.player_tracker?.nameplates?.heads_url) {
 					worldConfig.components.players!.imageUrl = entry =>
-						worldResponse.player_tracker.nameplates.heads_url
+						markersResponce.player_tracker.nameplates.heads_url
 							.replace('{uuid}', entry.uuid).replace('{name}', encodeURIComponent(entry.name));
 				}
 
 				worldConfig.components.players!.markers = {
-					hideByDefault: !!worldResponse.player_tracker?.default_hidden,
-					layerName: worldResponse.player_tracker?.label || '',
-					layerPriority: worldResponse.player_tracker?.priority,
+					hideByDefault: !!markersResponce.player_tracker?.default_hidden,
+					layerName: markersResponce.player_tracker?.label || '',
+					layerPriority: markersResponce.player_tracker?.priority,
 					imageSize: images ? (health && armor ? 'large' : 'small') : 'none',
 					showHealth: health,
 					showArmor: armor,
-					showYaw: true,
+					showYaw: false,
 				}
 			}
 
 			this.worldComponents.set(world.name, worldConfig);
-
-			if(!worldResponse) {
-				console.warn(`World ${world.name} has no matching world config. Ignoring.`);
-				return;
-			}
 
 			let dimension: LiveAtlasDimension = 'overworld';
 
@@ -174,44 +181,68 @@ export default class Pl3xmapMapProvider extends MapProvider {
 
 			const maps: Set<LiveAtlasMapDefinition> = new Set();
 
+            if (!world.displayName || world.displayName == world.name)
+                console.warn(`World "${world.name}" don't have a display name.`);
+
 			const w = {
 				name: world.name || '(Unnamed world)',
-				displayName: world.display_name || world.name,
+				displayName: world.displayName || world.name,
 				dimension,
 				seaLevel: 0,
 				maps,
 			};
+            
+            if (!Array.isArray(world.renderers))
+                continue;
+            
+            (world.renderers  as Array<{value: string, label: string, icon: string}>).forEach(render => {
+                if (!render || !render.label) {
+                    console.warn(`World "${world.name}" has a renderer with no label.`);
+                    return;
+                }
 
-			maps.add(Object.freeze(new LiveAtlasMapDefinition({
-				world: w,
+                const maxOut = worldResponse.zoom.maxOut ?? 3;
+                const maxIn = worldResponse.zoom.maxIn ?? 2;
+                const defaultZoom = (worldResponse.zoom.default ?? 0) + maxIn;
 
-				name: 'flat',
-				displayName: 'Flat',
-				icon: world.icon ? `${this.config}images/icon/${world.icon}.png` : undefined,
+                maps.add(Object.freeze(new LiveAtlasMapDefinition({
+                    world: w,
 
-				baseUrl: `${this.config}tiles/${w.name}/`,
-				imageFormat: 'png',
-				tileSize: 512,
+                    name: render.label.toLowerCase(),
+                    displayName: render.value,
+                    icon: render.icon ? `${this.config}images/icon/${render.icon}.png` : undefined,
 
-				background: 'transparent',
-				backgroundDay: 'transparent',
-				backgroundNight: 'transparent',
+                    baseUrl: `${this.config}tiles/${w.name}/`,
+                    imageFormat: 'png',
+                    tileSize: 512,
 
-				nativeZoomLevels: worldResponse.zoom.max || 1,
-				extraZoomLevels: worldResponse.zoom.extra,
-				defaultZoom: worldResponse.zoom.def || 1,
-				tileUpdateInterval: worldResponse.tiles_update_interval ? worldResponse.tiles_update_interval * 1000 : undefined,
+                    background: 'transparent',
+                    backgroundDay: 'transparent',
+                    backgroundNight: 'transparent',
 
-				center: {x: worldResponse.spawn.x, y: 0, z: worldResponse.spawn.z},
-			})));
+                    nativeZoomLevels: maxOut,
+                    maxZoom: maxOut + maxIn,
+                    extraZoomLevels: maxIn,
+                    defaultZoom: defaultZoom,
+                    tileUpdateInterval: worldResponse.tileUpdateInterval ? worldResponse.tileUpdateInterval * 1000 : undefined,
+
+                    renderer: render.label || 'basic',
+
+                    center: {
+                        x: worldResponse.spawn.x,
+                        y: 0,
+                        z: worldResponse.spawn.z,
+                    },
+                })));
+            });
 
 			worlds.push(w);
-		});
+		};
 
 		return Array.from(worlds.values());
 	}
 
-	private static buildComponents(response: any): LiveAtlasComponentConfig {
+	private static buildComponents(response: any, baseConfigurationResponse: any): LiveAtlasComponentConfig {
 		const components: LiveAtlasComponentConfig = {
 			coordinatesControl: undefined,
 			linkControl: !!response.ui?.link?.enabled,
@@ -238,10 +269,12 @@ export default class Pl3xmapMapProvider extends MapProvider {
 			logoControls: [],
 			login: false,
 		};
+        
+        const lang = baseConfigurationResponse.lang;
 
 		if(response.ui?.coordinates?.enabled) {
 			//Try to remove {x}/{z} placeholders are we aren't using them
-			const label = (response.ui?.coordinates?.html || "Location: ").replace(/{x}.*{z}/gi, '').trim(),
+			const label = (lang.coords.label || "Location: ").replace(/{x}.*{z}/gi, '').trim(),
 				labelPlain = new DOMParser().parseFromString(label, 'text/html').body.textContent || "";
 
 			components.coordinatesControl = {
@@ -255,92 +288,126 @@ export default class Pl3xmapMapProvider extends MapProvider {
 		return components;
 	}
 
-	private async getMarkerSets(world: LiveAtlasWorldDefinition): Promise<void> {
-		const url = `${this.config}tiles/${encodeURIComponent(world.name)}/markers.json`;
+    private async getMarkerSets(world: LiveAtlasWorldDefinition): Promise<void> {
+        const url = `${this.config}tiles/${encodeURIComponent(world.name)}/markers.json`;
+        const abortController = new AbortController();
 
-		if(this.markersAbort) {
-			this.markersAbort.abort();
-		}
+        try {
+            const sets = await Pl3xmapMapProvider.getJSON(url, abortController.signal);
+            
+            if (!Array.isArray(sets)) {
+                console.warn("Invalid marker sets format");
+                return;
+            }
 
-		this.markersAbort = new AbortController();
+             for (const set of sets) {
+                if (!set || !set.key) {
+                    console.warn('Ignoring marker set without key');
+                    continue;
+                }
+                
+                if (set.key == "pl3xmap_players")
+                    continue;
 
-		const response = await Pl3xmapMapProvider.getJSON(url, this.markersAbort.signal);
+                const id = set.key;
+                const markerUrl = `${this.config}tiles/${encodeURIComponent(world.name)}/markers/${id}.json`;
+                
+                let rawMarkers: any[];
+                
+                try {
+                    rawMarkers = await Pl3xmapMapProvider.getJSON(markerUrl, abortController.signal);
+                } catch (e) {
+                    console.warn(`Could not load markers for set ${id}:`, e);
+                    continue;
+                }
+                
+                const markers: Map<string, LiveAtlasMarker> = new Map();
 
-		if(!Array.isArray(response)) {
-			return;
-		}
+                (rawMarkers || []).forEach((marker: any, index: number) => {
+                    if (!marker || !marker.type || !marker.data) {
+                        return;
+                    }
+                    
+                    let markerId;
 
-		response.forEach(set => {
-			if(!set || !set.id) {
-				console.warn('Ignoring marker set without id');
-				return;
-			}
+                    switch(marker.type) {
+                        case 'icon':
+                            markerId = `point_${index}`;
+                            markers.set(markerId, this.buildMarker(markerId, marker));
+                            break;
 
-			const id = set.id,
-				markers: Map<string, LiveAtlasMarker> = Object.freeze(new Map());
+                        case 'line':
+                            markerId = `line_${index}`;
+                            markers.set(markerId, Pl3xmapMapProvider.buildLine(markerId, marker));
+                            break;
 
-			(set.markers || []).forEach((marker: any) => {
-				let markerId;
+                        case 'rectangle':
+                        case 'polygon':
+                            markerId = `area_${index}`;
+                            markers.set(markerId, Pl3xmapMapProvider.buildArea(markerId, marker));
+                            break;
 
-				switch(marker.type) {
-					case 'icon':
-						markerId = `point_${markers.size}`;
-						markers.set(markerId, this.buildMarker(markerId, marker));
-						break;
+                        case 'circle':
+                        case 'ellipse':
+                            markerId = `circle_${index}`;
+                            markers.set(markerId, Pl3xmapMapProvider.buildCircle(markerId, marker));
+                            break;
 
-					case 'polyline':
-						markerId = `line_${markers.size}`;
-						markers.set(markerId, Pl3xmapMapProvider.buildLine(markerId, marker));
-						break;
+                        default:
+                            console.warn('Marker type ' + marker.type + ' not supported');
+                    }
+                });
 
-					case 'rectangle':
-					case 'polygon':
-						markerId = `area_${markers.size}`;
-						markers.set(markerId, Pl3xmapMapProvider.buildArea(markerId, marker));
-						break;
-
-					case 'circle':
-					case 'ellipse':
-						markerId = `circle_${markers.size}`;
-						markers.set(markerId, Pl3xmapMapProvider.buildCircle(markerId, marker));
-						break;
-
-					default:
-						console.warn('Marker type ' + marker.type + ' not supported');
-				}
-			});
-
-			this.markerSets.set(id, {
-				id,
-				label: set.name || "Unnamed set",
-				hidden: set.hide || false,
-				priority: set.order || 0,
-				showLabels: false
-			});
-			this.markers.set(id, markers);
-		});
-	}
+                this.markerSets.set(id, {
+                    id,
+                    label: set.label || "Unnamed set",
+                    hidden: set.defaultHidden || false,
+                    priority: set.priority || 0,
+                    showLabels: false
+                });
+                
+                this.markers.set(id, Object.freeze(markers));
+            }
+            
+            
+        } catch (e) {
+            if (e instanceof DOMException && e.name === 'AbortError') {
+                console.warn(`Marker update for ${world.name} was aborted`);
+            } else {
+                throw e;
+            }
+        }
+    }
 
 	private buildMarker(id: string, marker: any): LiveAtlasPointMarker {
+        const data = marker.data || {};
+        const options = marker.options || {};
+        const tooltip = options.tooltip?.content || '';
+        
 		return {
 			id,
 			type: LiveAtlasMarkerType.POINT,
 			location: {
-				x: marker.point?.x || 0,
+				x: data.point?.x || 0,
 				y: 0,
-				z: marker.point?.z || 0,
+				z: data.point?.z || 0,
 			},
-			iconSize: marker.size ? [marker.size.x || 16, marker.size.z || 16] : [16, 16],
-			iconUrl: `${this.config}images/icon/registered/${marker.icon || "default"}.png`,
+			iconSize: data.size ? [data.size.x || 16, data.size.z || 16] : [16, 16],
+			iconUrl: `${this.config}images/icon/registered/${data.image || "default"}.png`,
 
-			tooltip: marker.tooltip ? stripHTML(marker.tooltip) : '',
-			tooltipHTML: marker.tooltip,
-			popup: marker.popup,
+			tooltip: stripHTML(tooltip),
+			tooltipHTML: tooltip,
+			popup: undefined,
 			isPopupHTML: true,
+            rotationAngle: data.rotationAngle || 0,
+            rotationOrigin: data.rotationOrigin || "center",
 		};
 	}
 
 	private static buildArea(id: string, area: any): LiveAtlasAreaMarker {
+        const data = area.data || {};
+        const options = area.options || {};
+        const tooltip = options.tooltip?.content || '';
 		let points;
 
 		if(area.type === 'rectangle') {
@@ -374,35 +441,52 @@ export default class Pl3xmapMapProvider extends MapProvider {
 			location: getMiddle(bounds),
 			outline: false,
 
-			tooltip: area.tooltip ? stripHTML(area.tooltip) : '',
-			tooltipHTML: area.tooltip,
-			popup: area.popup,
+			tooltip: stripHTML(tooltip),
+			tooltipHTML: tooltip,
+			popup: undefined,
 			isPopupHTML: true,
 		};
 	}
 
 	private static buildLine(id: string, line: any): LiveAtlasLineMarker {
-		const points = this.addY(line.points),
+        const data = line.data || {};
+        const options = line.options || {};
+        const tooltip = options.tooltip?.content || '';
+		const points = this.addY(data.points),
 			bounds = getBoundsFromPoints(points);
 
 		return {
 			id,
 			type: LiveAtlasMarkerType.LINE,
 			style: {
-				stroke: (typeof line.stroke === 'undefined' || !!line.stroke) && !!line.color,
-				color: line.color || '#3388ff',
-				weight: line.weight || 3,
-				opacity: typeof line.opacity !== 'undefined' ? line.opacity : 1,
+				stroke: (typeof options.stroke === 'undefined' || !!options.stroke) && !!options.stroke.color,
+				color: typeof options.stroke.color === 'number' ? Pl3xmapMapProvider.intToCssColor(options.stroke.color) : (options.stroke.color || '#3388ff'),
+				weight: options.stroke.weight || 3,
+				opacity: typeof options.opacity !== 'undefined' ? options.opacity : 1,
 			},
 			points,
 			bounds,
 			location: getMiddle(bounds),
-			tooltip: line.tooltip ? stripHTML(line.tooltip) : '',
-			tooltipHTML: line.tooltip,
-			popup: line.popup,
+			tooltip: stripHTML(tooltip),
+			tooltipHTML: tooltip,
+			popup: undefined,
 			isPopupHTML: true,
 		};
 	}
+    
+    private static intToCssColor(color: number): string {
+        const argb = color >>> 0;
+
+        const a = (argb >> 24) & 0xFF;
+        const r = (argb >> 16) & 0xFF;
+        const g = (argb >> 8) & 0xFF;
+        const b = argb & 0xFF;
+        if (a < 255) {
+            return `#${a.toString(16).padStart(2, '0')}${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+        }
+
+        return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+    }
 
 	private static buildCircle(id: string, circle: any): LiveAtlasCircleMarker {
 		const radius = [circle.radiusX || circle.radius || 0, circle.radiusZ || circle.radius || 0] as PointTuple,
@@ -462,7 +546,7 @@ export default class Pl3xmapMapProvider extends MapProvider {
 		}
 
 		const config = Pl3xmapMapProvider.buildServerConfig(response),
-			worldNames: string[] = (response.worlds || []).filter((world: any) => world && !!world.name)
+			worldNames: string[] = (response.worldSettings || []).filter((world: any) => world && !!world.name)
 				.map((world: any) => world.name);
 
 		const worldResponses = await Promise.all(worldNames.map(name =>
@@ -470,8 +554,9 @@ export default class Pl3xmapMapProvider extends MapProvider {
 
 		this.store.commit(MutationTypes.SET_SERVER_CONFIGURATION, config);
 		this.store.commit(MutationTypes.SET_MESSAGES, Pl3xmapMapProvider.buildMessagesConfig(response));
-		this.store.commit(MutationTypes.SET_WORLDS, this.buildWorlds(response, worldResponses));
-		this.store.commit(MutationTypes.SET_COMPONENTS, Pl3xmapMapProvider.buildComponents(response));
+		this.store.commit(MutationTypes.SET_WORLDS, await this.buildWorlds(response, worldResponses));
+        const uiResponse = await Pl3xmapMapProvider.getJSON(`${baseUrl}tiles/ui.json`, this.configurationAbort.signal);
+		this.store.commit(MutationTypes.SET_COMPONENTS, Pl3xmapMapProvider.buildComponents(uiResponse, response));
 	}
 
 	async populateWorld(world: LiveAtlasWorldDefinition) {
@@ -492,9 +577,9 @@ export default class Pl3xmapMapProvider extends MapProvider {
 	createTileLayer(options: LiveAtlasTileLayerOptions): LiveAtlasTileLayer {
 		return new Pl3xmapTileLayer(options);
 	}
-
+    
 	private async getPlayers(): Promise<Set<LiveAtlasPlayer>> {
-		const url = `${this.config}tiles/players.json`;
+		const url = `${this.config}tiles/settings.json`;
 
 		if(this.playersAbort) {
 			this.playersAbort.abort();
@@ -506,22 +591,23 @@ export default class Pl3xmapMapProvider extends MapProvider {
 			players: Set<LiveAtlasPlayer> = new Set();
 
 		(response.players || []).forEach((player: any) => {
+            
 			players.add({
-				name: (player.name || '').toLowerCase(),
+				name: player.name.toLowerCase(),
 				uuid: player.uuid,
-				displayName: player.display_name || player.name || "",
-				health: player.health || 0,
-				armor: player.armor || 0,
+				displayName: player.displayName,
+				health: 0,
+				armor: 0,
 				sort: 0,
 				hidden: false,
 				location: {
 					//Add 0.5 to position in the middle of a block
-					x: !isNaN(player.x) ? player.x + 0.5 : 0,
+					x: player.position?.x + 0.5 || 0,
 					y: 0,
-					z: !isNaN(player.z) ? player.z + 0.5 : 0,
+					z: player.position?.z + 0.5 || 0,
 					world: player.world,
 				},
-				yaw: !isNaN(player.yaw) ? parseFloat(player.yaw) + 180 : 0,
+				yaw: player.rotationAngle ?? 0
 			});
 		});
 
@@ -543,7 +629,7 @@ export default class Pl3xmapMapProvider extends MapProvider {
 		// 	});
 		// }
 
-		this.store.commit(MutationTypes.SET_MAX_PLAYERS, response.max || 0);
+		this.store.commit(MutationTypes.SET_MAX_PLAYERS, (response.players || []).length);
 
 		return players;
 	}
@@ -598,10 +684,6 @@ export default class Pl3xmapMapProvider extends MapProvider {
 
 		if(this.playersAbort) {
 			this.playersAbort.abort();
-		}
-
-		if(this.markersAbort) {
-			this.markersAbort.abort();
 		}
 	}
 }

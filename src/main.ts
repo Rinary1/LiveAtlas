@@ -20,6 +20,7 @@ import { VueClipboard } from '@soerenmartius/vue3-clipboard';
 import 'modern-normalize/modern-normalize.css';
 import 'leaflet/dist/leaflet.css';
 import '@/scss/style.scss';
+import '@/lib/L.rotated';
 
 import {store} from "@/store";
 import {MutationTypes} from "@/store/mutation-types";
