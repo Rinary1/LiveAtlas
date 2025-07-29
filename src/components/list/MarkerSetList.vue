@@ -20,7 +20,7 @@
 			<input :id="`marker-set-${id}`" type="radio" name="marker-set" v-model="currentSet" v-bind:value="markerSet">
 			<label :for="`marker-set-${id}`">
 				<span>{{ markerSet.label || id }}</span>
-				<span>{{ markerCounts.get(markerSet) }} Marker(s)</span>
+				<span>{{ pluralMarker(markerCounts.get(markerSet) || 0) }}</span>
 			</label>
 		</template>
 	</RadioList>
@@ -44,6 +44,8 @@ import {nonReactiveState} from "@/store/state";
 import RadioList from "@/components/util/RadioList.vue";
 import MarkerList from "@/components/list/MarkerList.vue";
 import SvgIcon from "@/components/SvgIcon.vue";
+import {useStore} from "@/store";
+import {getPluralMessage} from '@/util/i18n'
 import {registerUpdateHandler, unregisterUpdateHandler} from "@/util/markers";
 
 export default defineComponent({
@@ -66,6 +68,9 @@ export default defineComponent({
 	},
 
 	setup(props) {
+        const store = useStore(),
+            pluralMarker = (count: number) =>
+                getPluralMessage(store.state.messages.marker, count)
 		const markerCounts = ref<Map<LiveAtlasMarkerSet, number>>(new Map()),
 			currentSet = ref<LiveAtlasMarkerSet | undefined>(undefined),
 			list = ref<ComponentPublicInstance | null>(null),
@@ -120,6 +125,7 @@ export default defineComponent({
 		});
 
 		return {
+            pluralMarker,
 			markerCounts,
 			currentSet,
 			list,

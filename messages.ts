@@ -14,6 +14,12 @@
  * limitations under the License.
  */
 
+export type pluralMessage = {
+  one: string;
+  few: string;
+  many: string;
+};
+
 export const globalMessages = [
 	'chatNoMessages',
 	'chatTitle',
@@ -74,6 +80,10 @@ export const globalMessages = [
 	'logoutSuccess',
 	'closeTitle',
 	'showMore',
+] as const;
+
+export const pluralMessages = [
+    'marker'
 ] as const;
 
 export const serverMessages = [

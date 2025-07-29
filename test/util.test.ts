@@ -17,7 +17,7 @@
 import {getGlobalMessages, getMessages, getUrlForLocation, guessWorldDimension, parseUrl} from "@/util";
 import {LiveAtlasDimension, LiveAtlasGlobalMessageConfig, LiveAtlasMessageConfig, LiveAtlasParsedUrl} from "@/index";
 import LiveAtlasMapDefinition from "@/model/LiveAtlasMapDefinition";
-import {globalMessages, serverMessages} from "../messages";
+import {globalMessages, pluralMessages, serverMessages} from "../messages";
 
 const validURLs: [string, URL, LiveAtlasParsedUrl][] = [
 	[
@@ -442,7 +442,11 @@ test("getMessages", () => {
 		result[key] = `Missing message: ${key}`;
 		return result;
 	}, {});
-	const expectedMessages: LiveAtlasMessageConfig = Object.assign({}, expectedGlobal, serverMessages.reduce((result: any, key) => {
+	const expectedPlural: LiveAtlasGlobalMessageConfig = pluralMessages.reduce((result: any, key) => {
+		result[key] = `Missing message: ${key}`;
+		return result;
+	}, {});
+	const expectedMessages: LiveAtlasMessageConfig = Object.assign({}, expectedGlobal, expectedPlural, serverMessages.reduce((result: any, key) => {
 		result[key] = `Missing message: ${key}`;
 		return result;
 	}, {}));

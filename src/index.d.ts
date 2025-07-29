@@ -28,7 +28,7 @@ import LiveAtlasMapDefinition from "@/model/LiveAtlasMapDefinition";
 import {CoordinatesControlOptions} from "@/leaflet/control/CoordinatesControl";
 import {ClockControlOptions} from "@/leaflet/control/ClockControl";
 import {LogoControlOptions} from "@/leaflet/control/LogoControl";
-import {globalMessages, serverMessages} from "../messages";
+import {globalMessages, pluralMessages, pluralMessage, serverMessages} from "../messages";
 import {LiveAtlasMarkerType} from "@/util/markers";
 import {LiveAtlasTileLayer, LiveAtlasTileLayerOptions} from "@/leaflet/tileLayer/LiveAtlasTileLayer";
 import "../lib/L.rotated";
@@ -114,12 +114,16 @@ type LiveAtlasGlobalMessageConfig = {
 	[K in typeof globalMessages[number]]: string;
 }
 
+type LiveAtlasPluralMessageConfig = {
+	[K in typeof pluralMessages[number]]: pluralMessage;
+}
+
 // Messages defined by dynmap configuration responses and can vary per server
 type LiveAtlasServerMessageConfig = {
 	[K in typeof serverMessages[number]]: string;
 }
 
-type LiveAtlasMessageConfig = LiveAtlasGlobalMessageConfig & LiveAtlasServerMessageConfig;
+type LiveAtlasMessageConfig = LiveAtlasGlobalMessageConfig & LiveAtlasPluralMessageConfig & LiveAtlasServerMessageConfig;
 
 interface LiveAtlasUIConfig {
 	playersAboveMarkers: boolean;

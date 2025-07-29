@@ -20,12 +20,13 @@ import {
 	LiveAtlasBounds,
 	LiveAtlasDimension,
 	LiveAtlasGlobalMessageConfig,
+    LiveAtlasPluralMessageConfig,
 	LiveAtlasLocation,
 	LiveAtlasMessageConfig, LiveAtlasParsedUrl,
 } from "@/index";
 import {Store} from "@/store";
 import LiveAtlasMapDefinition from "@/model/LiveAtlasMapDefinition";
-import {globalMessages, serverMessages} from "../messages";
+import {globalMessages, pluralMessages, serverMessages} from "../messages";
 import ConfigurationError from "@/errors/ConfigurationError";
 
 const documentRange = document.createRange(),
@@ -268,7 +269,8 @@ export const clipboardError = (store: Store) => (e: Error) => {
  */
 export const getMessages = (config: any = {}) => {
 	return Object.assign(_getMessages(globalMessages, config),
-		_getMessages(serverMessages, config)) as LiveAtlasMessageConfig;
+		_getMessages(pluralMessages, config),
+        _getMessages(serverMessages, config)) as LiveAtlasMessageConfig;
 }
 
 /**
